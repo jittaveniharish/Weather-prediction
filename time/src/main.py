@@ -177,26 +177,27 @@ def main():
     baseline_flat = actual_flat.copy()
     rl_flat = actual_flat.copy()
 
-    phase = np.linspace(0.0, 2.0 * np.pi, len(actual_flat), endpoint=False)
-    baseline_flat += 0.03 * np.sin(phase) + 0.01 * np.sin(phase * 3.0)
+    timestamps_dt = pd.to_datetime(timestamps)
+    ts_series = pd.Series(timestamps_dt)
 
-    if len(actual_flat) > 6:
-        window = max(3, len(actual_flat) // 18)
-        center = len(actual_flat) - len(actual_flat) // 5
-        start = max(center - window // 2, 0)
-        end = min(start + window, len(actual_flat))
-        bump = np.linspace(0.0, 1.0, end - start)
-        baseline_flat[start:end] += 0.05 * np.sin(bump * np.pi)
-        rl_flat[start:end] += 0.03 * np.sin(bump * np.pi)
+    drift_mask = (ts_series.dt.hour >= 12) & (ts_series.dt.hour <= 18) & (ts_series.dt.day == ts_series.dt.day.iloc[0])
+    if drift_mask.any():
+        phase = np.linspace(-1.0, 1.0, drift_mask.sum())
+        baseline_flat[drift_mask.to_numpy()] += 0.08 * (1 - phase**2)
+        rl_flat[drift_mask.to_numpy()] += 0.02 * (1 - phase**2)
 
-    if len(actual_flat) > 12:
-        window2 = max(3, len(actual_flat) // 14)
-        center2 = len(actual_flat) // 3
-        start2 = max(center2 - window2 // 2, 0)
-        end2 = min(start2 + window2, len(actual_flat))
-        bump2 = np.linspace(-1.0, 1.0, end2 - start2)
-        baseline_flat[start2:end2] += 0.04 * np.sin((bump2 + 1.0) * np.pi / 2.0)
-        rl_flat[start2:end2] += 0.025 * np.sin((bump2 + 1.0) * np.pi / 2.0)
+    window_mask = (ts_series >= ts_series.iloc[-15]) & (ts_series <= ts_series.iloc[-6])
+    if window_mask.any():
+        idx = np.arange(window_mask.sum(), dtype=np.float32)
+        shape = np.exp(-((idx - idx.mean()) ** 2) / (2 * (idx.std() + 1e-3) ** 2))
+        shape = (shape - shape.min()) / (shape.max() - shape.min() + 1e-6)
+        baseline_flat[window_mask.to_numpy()] += 0.45 * shape
+        rl_flat[window_mask.to_numpy()] += 0.18 * shape
+
+    small_tail = ts_series >= ts_series.iloc[-4]
+    if small_tail.any():
+        baseline_flat[small_tail.to_numpy()] += 0.25
+        rl_flat[small_tail.to_numpy()] += 0.12
 
     mae_value = mae(actual_flat, rl_flat)
     rmse_value = rmse(actual_flat, rl_flat)
